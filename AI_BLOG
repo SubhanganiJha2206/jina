@@ -1,0 +1,129 @@
+To keep up to date on the latest industry news, machine learning blogs are a valuable, yet sometimes overlooked, resource. They educate. They more narrowly focus on niche areas that textbooks and news publications may gloss over. And they provide fascinating insight into how some of the top minds in a particular industry work.
+
+In the world of artificial intelligence, there is an abundance of blogs that offer illuminating perspectives on recent trends, new products, and industry news. For any budding machine learning engineer, spending time in the AI blogosphere will not only help your prospects for career advancement but also keep you connected to the broader AI community.Our goal is to learn drift dynamics. How much did our data change in the past?
+
+This is useful for two reasons:
+
+First, we can understand the model decay profile.
+model decay in time
+We shared a similar idea on how you could check for model retraining needs in advance. There, we looked at how model performance changes over time.
+
+Now, we look at how the data changes. You can prefer one to another. Understanding data drift is especially helpful if we know we'll have to wait for the ground truth labels in production.
+
+Assuming that the data changes at some constant pace, we can use this analysis to set our expectations. And prepare the proper infrastructure.
+
+Is the use case highly dynamic? Should we get ready for frequent retraining and build automatic pipelines?
+
+Second, this analysis can help us define the model monitoring triggers.
+Alert during model decay
+We might want to check for data drift once the model is in production. How sensitive should our triggers be? What needs to happen for us to react to drift?
+
+To choose the thresholds and conditions, we need to understand how our data changed in the past. It is a delicate balance! We don't want too many false alarms, but we also want to react to meaningful changes.
+
+We can run several drift checks on the past data (modeling different drift thresholds and monitoring windows) and explore the results.
+
+Here is an example of how this can be done.
+Defining drift detection logic
+Let's take a bike-sharing dataset from Kaggle. We'll use it to explore the past drift in data. You can follow it in this example Jupyter notebook.
+
+In a real-life setting, you can work similarly with your training data.
+
+To decide on our drift detection logic, we should make a few assumptions.
+different windows for comparison
+First, we should define the comparison window.
+
+For example, we can look at data month-by-month. This choice depends on your data understanding. How is the data generated? What is the real-world process behind it? How fast do you expect it to change?
+
+Here are a few tips:
+
+If your data has known seasonality, you can account for it. For example, perform a week-by-week comparison and not the day-by-day one to avoid overreacting to the weekend patterns. Or compare December data for different years between each other.
+
+If you have an idea of how quickly the model degrades, use it as starting point. We shared this approach before. If you know that your model degrades in a month, you can look at the weekly drift to see how far in advance you can predict this drop and how it looks.
+
+You can build several drift "views" and set different expectations. For example, look at both weekly and monthly drift and set different thresholds. The use case is what defines it: you can have multiple seasonalities or other known patterns.
+You can always test a few assumptions and see how this changes the outcome.
+Is this drift?
+Our second assumption is the drift detection threshold.
+
+We can evaluate drift for individual features using statistical tests and judge the results based on P-values.
+
+But to act on it or implement monitoring triggers, we often need some "yes" or "no" decision or an aggregate number for the whole dataset. To do this, we can implement some custom logic on top of the results of the statistical tests.
+
+For example, we can look at the share of drifting features and only raise alarms if over 50% of those have a statistically significant change.
+
+We can also manipulate the confidence level of statistical tests. The usual default is 0.95, but you might have your reasons to set it at 0.99 or 0.9, for example.
+
+Here are a few tips:
+
+You can focus on the key features only. You can assign different weights to features based on the importance or simply run the drift detection only for the top features. Not all drift is created equal. Often a variation in secondary features does not influence the key performance metrics.
+
+If you have many weak features, you can look at the overall drift. But in this case, you can increase the threshold to define that drift has occurred (both in terms of the higher confidence level and the number of features).
+
+In our example, we have several months of data.
+
+Let's define our assumptions:
+We use the first month as training data.
+We perform drift comparisons on a month-by-month basis.
+We will test both drifts for individual features and for the dataset.
+In case of dataset drift, we will set the confidence level for our statistical tests at 0.95. We will treat all features as equally important and consider that our dataset has drifted if more than 50% of the features drift.
+How it looks in code
+To see all the details, head to our example Jupyter notebook.
+
+To implement this approach, we will use the following libraries:
+
+JSON, pandas, and NumPy as standard libraries needed to work with data.
+Plotly, to visualize our data drift.
+Evidently, to calculate the drift using statistical tests.
+Mlflow, to log and record the results.
+Once we import the libraries, we load the data. This is how it looks:
+data sample
+We define column mapping to specify the feature type. That is needed to perform the correct statistical tests using Evidently.
+data_columns = {}
+data_columns['numerical_features'] = ['weather', 'temp', 'atemp', 'humidity', 'windspeed']
+We also define our reference data (the first month) and the following periods to evaluate for drift. We treat each month of data as an experiment.
+reference_dates = ('2011-01-01 00:00:00','2011-01-28 23:00:00')
+
+experiment_batches = [
+    ('2011-02-01 00:00:00','2011-02-28 23:00:00'),
+    ('2011-03-01 00:00:00','2011-03-31 23:00:00'),
+    ('2011-04-01 00:00:00','2011-04-30 23:00:00'),
+    ('2011-05-01 00:00:00','2011-05-31 23:00:00'),  
+    ('2011-06-01 00:00:00','2011-06-30 23:00:00'), 
+    ('2011-07-01 00:00:00','2011-07-31 23:00:00'), 
+]
+Next, we implemented two custom functions. They introduce logic on top of the results of statistical tests provided by Evidently profiles.
+
+The first one helps detect dataset drift. It will return a singular true TRUE or FALSE response on the overall drift. We can set the confidence level for statistical tests and choose the threshold of drifting features. We can also get a share of drifting features by setting get_ratio as TRUE.
+
+The second one helps detect feature drift. Evidently already returns P-values for the individual features in the JSON Profile output. We add this function to get a binary response for each feature: 1 for drift, 0 if not. We can set the confidence level for statistical tests. And, we can still get the P-value for each feature by setting get_pvalues as TRUE.
+
+You can build your custom logic following this example.
+Visualizing feature drift
+Let's start with the feature drift.
+
+We call our function to evaluate the drift for individual features.
+features_historical_drift = []
+
+for date in experiment_batches:
+    drifts = detect_features_drift(raw_data.loc[reference_dates[0]:reference_dates[1]], 
+                           raw_data.loc[date[0]:date[1]], 
+                           column_mapping=data_columns, 
+                           confidence=0.95,
+                           threshold=0.9)
+    
+    features_historical_drift.append([x[1] for x in drifts])
+    
+features_historical_drift_frame = pd.DataFrame(features_historical_drift, columns = data_columns['numerical_features'])
+We then use Plotly to visualize the results on a heatmap. We color the periods where we detect drift in red.
+
+This is what we get:
+feature drift heatmap
+Ouch! Not at all stable.
+
+The truth is, we took a use case with high seasonality. Our data is literally about the weather. Temperature, humidity, wind speed patterns change a lot month by month.
+
+This gives us a very clear signal that we need to factor in the most recent data and update the model often.
+
+If we want to look at it in a more granular fashion, we can plot our P-values. We set the get_pvalues as TRUE and then generate a new plot.
+feature drift heatmap
+In case of more subtle changes, it can be helpful to see the P-values as gradients and not just the boolean TRUE/FALSE for drift.
